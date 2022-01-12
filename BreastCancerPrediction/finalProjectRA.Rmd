@@ -1,0 +1,363 @@
+---
+title: "Final Project RA"
+author: "Ben Sikora"
+date: "12/17/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Abstract
+For my project, I created a logistic regression model to see if I could better accurately predict cancerous breast mass lesions in mammograms than doctors. As it stands, there is currently an incredibly high false positive rate among mammogram testing, which has lead to unnecessary biopsies. I created/tested various logistic models and cutoff points, and determined that a lesions shape and margin and the patient's age were the best predictive variables and the optimal cutoff value was 0.344. My final logistic model achieved an overall accuracy of 80%, sensitivity of 90%, and specificity of 70%, which was much more balanced than doctors high sensitivity and low specificity predictions. As the cost of misdiagnosing a malignant tumor is incredibly high, however, the comparison between doctors predictions and my final logistic model calls into question about what is an acceptable drop off in sensitivity for specificity. My model doesn't have enough predictive power to completely eliminate doctor influence, but adding in more variables and creating a better system to categorize lesions may lead to better models in the future. 
+
+
+## Introduction
+
+A mammogram is a medical x-ray that can be used to determine if a patients breast mass lesion is an early form of breast cancer. Mammogram results, however, are generally hard to interpret and thus have been notorious for causing a large number of unnecessary biopsies. In fact, the dataset cites that over 70% of biopsies for breast cancer end up being on benign lesions. Instead of leaving the mammogram results to human interpretation, however, it could be possible to create an algorithm that could make a prediction with a higher accuracy than doctors interpretations and reduce the number of unnecessary biopsies. Thus, for this project, I plan to build a logistic regression model from mammogram result data, and then I will compare my predicted results to the doctors' predictions. 
+
+In building the model, while it is important to increase specificity to minimize unnecessary biopsies, it is absolutely essential to keep sensitivity as high as possible because a nightmare scenario is incorrectly identifying a lesion as benign and not operating. As such, my goal for the model is to increase specificity while minimizing drops in sensitivity.  
+
+The dataset for the model can be found [here](https://archive-beta.ics.uci.edu/ml/datasets/mammographic+mass), and consists of 961 patients mammogram results, doctor predictions, and known cancer values (Benign or Malignant). In total, the dataset is broken into 6 Variables. 
+
+1. BI-RADS Assessment: An assessment of the lesion, given by doctors, that ranges from 1 (Definitely Benign) to 6 (Highly suggestive of Malignancy). (Ordinal)
+
+2. Age: Patient's age in Years
+
+3. Shape: Mass Shape Round-1, Oval-2, Lobular-3, irregular-4 (Nominal) 
+
+4. Margin: Mass Margin Circumscribed-1, Microlobulated-2, Obscured-3, Ill-defined-4, Spiculated-5 (Nominal)
+
+5. Density: Mass Density High-1, Iso-2, Low-3, fat-containing-4, (Ordinal)
+
+6. Severity: Benign-0, Malignant-1. This attribute is known from further more in depth testing.
+
+
+My predictive variables are 2-5 and my response variable is Severity. I will use various cutoffs for the BI-RADS Assessment to create the doctor predictions. 
+
+
+```{r, echo= FALSE}
+mam= read.csv("mm.csv")
+colnames(mam)= c("br", "age", "shape", "margin", "density", "severity")
+
+#Removing Rows With Missing Values
+mam= subset(mam, br != "?" & age != "?" & shape != "?" & margin != "?"& density != "?" & severity != "?"  )
+
+#Making Sure Rows are treated correctly
+mam$br= as.numeric(mam$br)
+mam$age= as.numeric(mam$age)
+mam$shape= as.factor(mam$shape)
+mam$margin= as.factor(mam$margin)
+mam$density= as.numeric(mam$density)
+mam$severity= as.factor(mam$severity)
+
+##Found misnput from explatory analysis
+mam= subset(mam, br !=55)
+```
+
+
+## Methods
+
+For this project, I plan to use the best predictive values (Attributes 2-5) to see how accurately I can predict severity (Attribute 6) with a logistic regression model. I will first look at which attributes I wish to include in the final model by looking at model goodness of fit, comparing p-value of coefficients, and the likelihood ratio test. After that I will run diagnostics on my final model, and then I will pick the best-cutoff.
+
+### Spread of The Variables 
+Attached below is the explanatory analysis of the variables with comparisons to the distribution of severity within their respective categories. A couple of things to note about data cleaning for the rest of the project. 
+
+1. All observations with missing values or typos were removed from the dataset, bringing the new total number of observations to 828. 
+
+2. Variables that are Ordinal or Continuous (Br, Age, Density) were read in as numeric, while variables that are nominal were read in as categorical.
+
+
+```{r, echo= FALSE, warning= FALSE, results = FALSE }
+library(ggplot2)
+library(ggpubr)
+#Response Variable
+pie(table(mam$severity), labels= c("Benign", "Malignant"), main= "Distribution of Severity Within The Dataset")
+```
+
+The dataset gives fair representation to both Benign and Malignant lesions. Benign lesions makes up about 52% of the datset while Malignant lesions make up about 48%. 
+
+
+
+```{r, echo= FALSE, warning= FALSE, results = FALSE }
+##Br-Distribution
+ggplot(mam, aes(fill= severity, x=as.factor(br))) + geom_bar(color="black") +labs(x= "BR-Assessment")
+```
+
+As expected, the proportion of Malignant lesions becomes higher as the BR-Assessment increases. I was surprised to see though that almost 80% of lesions with an 4 assessment were still found to be benign, and that the vast majority of the observations were in the 4 to 5 category. I wonder if doctors have any bias to classify a lesion as Malignant, considering they are looking at a mammogram and there are significant repercussions if they classify it as incorrectly as Benign. 
+
+
+```{r, echo= FALSE, warning= FALSE, results = FALSE }
+#Potential Predictor Variables
+bar.age= ggplot(mam, aes(fill= severity, x=age)) + geom_histogram(color="black")
+bar.shape=ggplot(mam, aes(fill= severity, x=shape)) + geom_bar(color="black")
+bar.margin=ggplot(mam, aes(fill= severity, x=margin)) + geom_bar(color="black")
+bar.density=ggplot(mam, aes(fill= severity, x=as.factor(density))) + geom_bar(color="black") + labs(x= "density")
+
+##Layout
+ggarrange(bar.age, bar.shape, bar.margin, bar.density)
+
+```
+
+Attached above are histograms/barplots of the possible predictive variables with their distributions of the severity variable. The purpose of this plot, was to see if any of the variables could create separation of the two classes. Overall, I noticed that the proportion of malignant lesions increased with increases in age, shape, and margin but there were not that many changes over density. 
+
+### Selecting Best Variables
+
+Model with All Variables 
+```{r}
+##All Predictor Variables
+mam.glm.all= glm(severity ~ age+shape+margin+density, data= mam, family=binomial)
+summary(mam.glm.all)
+
+
+#Predicted Values 
+pi_hats <- predict.glm(mam.glm.all, type="response")
+
+#Results. Used this to create overall accuracy
+table(mam$severity, pi_hats>0.5)
+```
+
+**Note About Tables: The tables are a comparison of the predicted severity values (Represented as TRUE and FALSE) and the actual severity values (0 and 1). The same format of the table will be used throughout the project. **
+
+
+For the model with all the predictors, all of the coefficients had significant p-values(under a cutoff of 0.05) except for density and some categories for shape. The overall accuracy, with a cutoff of 0.5, was 81.6%. As density was found to be the least significant, I investigated to remove this variable first. 
+
+
+Model with All Predictor Variables Minus Density 
+```{r}
+##All Predictor Variables Minus Density
+mam.glm.density= glm(severity ~ age+shape+margin, data= mam, family=binomial)
+summary(mam.glm.density)
+
+#Predicted Values 
+pi_hats <- predict.glm(mam.glm.density, type="response")
+
+#Results. Used this to create overall accuracy
+table(mam$severity, pi_hats>0.5)
+```
+
+For the model with density removed, all of the coefficients had significant p-values(under a cutoff of 0.05) except for some categories in shape. The overall accuracy, with a cutoff of 0.5, was 81.5%. As some categories of shapes were insignificant, I then built a model with density and shape removed.
+
+
+Model with All Predictor Variables Minus Density and Shape
+```{r}
+##All Predictor Variables Minus Density and Shape
+mam.glm.shape= glm(severity ~ age+margin, data= mam, family=binomial)
+summary(mam.glm.shape)
+
+
+#Predicted Values 
+pi_hats <- predict.glm(mam.glm.shape, type="response")
+
+#Results. Used this to create overall accuracy
+table(mam$severity, pi_hats>0.5)
+```
+
+For the model with density and shape removed, all of the coefficients had significant p-values(under a cutoff of 0.05). The model had an overall accuracy of 78.4% with a cutoff of 0.5. 
+
+### Comparison of Models
+
+After computing all the models, I then compared all three models using the Holsem Test and the likelihood ratio test. I chose not to do a Pearson test because the age large distribution of the age category ensures there are no common covariate patterns, 
+
+```{r}
+##Comparison of All Models
+library(lmtest)
+library(ResourceSelection)
+
+#Holsem Test of All Models 
+hoslem.test(mam.glm.all$y, mam.glm.all$fitted.values)
+hoslem.test(mam.glm.density$y, mam.glm.density$fitted.values)
+hoslem.test(mam.glm.shape$y, mam.glm.shape$fitted.values)
+
+##Likelihood Ratio Tests between all variables and dropped density 
+lrtest(mam.glm.all, mam.glm.density)
+##Likelihood Ratio Tests between model with dropped density and 
+#model with dropped density and shape
+lrtest(mam.glm.density, mam.glm.shape)
+```
+
+Under the Hosmer Lemeshow goodness of fit tests, all three models appeared to fit the data well as we could not reject H naught for all three. 
+
+The comparison of the full model and the model without density, under the likelihood ratio test, showed that density removal was the better model selection as the p-value was well above the 0.05 cutoff. 
+
+The comparison though of the model without density and the model without density and shape, under the likelihood ratio test, showed that shapes removal negatively hurt the model as it was well below the 0.05 cutoff and could reject H naught. 
+
+As density seemed to be the most likely variable to be removed, I checked to see if the variable by itself could measure severity or to see if there was any interaction with the other terms. I found that it could not predict severity (with a cutoff just above 0.05) and there were no interactions with the other terms.
+```{r, echo=FALSE, results= FALSE}
+##Density Model 
+mam.glm.density.only= glm(severity ~ density, data= mam, family=binomial)
+summary(mam.glm.density.only)
+
+##Checking For Interaction.
+mam.glm.interaction= glm(severity ~ age*density+shape*density+margin*density, data= mam, family= binomial)
+summary(mam.glm.interaction)
+```
+
+As the Hosmer goodness of fit test, coefficient p-values, the likelihood ratio test, and my own testing all confirmed that density should be removed, I decided to move forward with the logistic model analyzing only age, margin, and shape. 
+
+### Diagnosis of the Final Model
+
+I analyzed my final model for multicollinearity and any high leverage values under dffits and cooks distance. 
+```{r}
+##Chosen Model Diagnostics
+
+#Multicolinearlity 
+library(car)
+vif(mam.glm.density)
+
+##Dffits
+dfyhat <- dffits(mam.glm.density)
+plot(abs(dfyhat), type= "h",  ylab="Dffits")
+
+##Cooks Distance
+cdist <- cooks.distance(mam.glm.density)
+plot(cdist, type="h", ylab="Cook's distance")
+
+```
+
+My model had no issues of multicolinearlity (with a vif cuttoff of 5) and had no influential observations under dffits and cooks distance with a cutoff of 1. Thus I felt comfortable moving forward with my model predictions. 
+
+
+### Picking a Cutoff Value
+
+
+I evaluated the final model under a variety of different cutoffs (0.1 through 0.9) while measuring overall accuracy, sensitivity, and specificity. Although the goal of the project is to increase specificity, I still wanted to emphasize sensitivity as it is imperative to ensure that malignant lesions are operated on. 
+
+```{r, echo=FALSE}
+#Picking Cutoff Value
+pi_hats <- predict.glm(mam.glm.density, type="response")
+
+
+##Building Error Table
+proposed_cut_offs <- seq(.1,.9,by=.001)
+len <- length(proposed_cut_offs)
+
+error_data <- data.frame(cut_off = proposed_cut_offs,
+                         overall_acc = rep(NA,len),
+                         sensitivity = rep(NA, len),
+                         specificity = rep(NA, len))
+for(i in 1:len){
+  threshold_value <- proposed_cut_offs[i]
+  x=table(mam$severity, pi_hats>threshold_value)
+  #828 Observations
+  error_data[i,"overall_acc"]= (x[1,1]+x[2,2])/nrow(mam)
+  error_data[i,"sensitivity"]= x[2,2]/(x[2,2]+ x[2,1])
+  error_data[i,"specificity"]= x[1,1]/(x[1,1]+ x[1,2])
+}
+plot(sensitivity ~ specificity, data= error_data)
+```
+
+The plot above displays the various sensitivity and specificity values across the cutoffs. I noticed that there had begun to be significant drops in specificity after around a 0.7 specificity and a 0.85 sensitivity. As I thought around 0.85 sensitivity was an acceptable trade off for such a high specificity, I decided to focus my attention here
+
+```{r, echo=FALSE}
+head(error_data[which(error_data$sensitivity>0.85 & error_data$specificity>0.7),])
+```
+
+The final cutoff I decided on for the model was 0.344 as this achieved the greatest sensitivity with minimum drops in accuracy and specificity. The final overall accuracy was 0.80, sensitivity 0.9, and specificity 0.7. 
+
+## Results
+
+
+Figure 1:
+
+
+```{r, echo=FALSE}
+summary(mam.glm.density)
+```
+
+Summary of Final Model
+
+Controlling for shape and margin, for every year a patient lived their log-ratio of the lesion being malignant increased by 0.05. 
+
+Controlling for age and margin, shape 4 had the highest log-ratio of the lesion being malignant, out of the rest of the shape categories. 
+
+Controlling for age and shape, margin 5 had the highest log-ratio of the lesion being malignant, out of the rest of the margin categories. 
+
+
+Table 1:
+
+```{r, echo=FALSE}
+pi_hats <- predict.glm(mam.glm.density, type="response")
+table(mam$severity, pi_hats>0.344)
+```
+
+Table of results of the final Model with a cutoff of 0.344. The overall accuracy was 0.80, sensitivity 0.9, and specificity 0.7. 
+
+Comparison to BI-RADS Assessment
+```{r, echo=FALSE}
+##Building Comparison
+
+type= c("logMod", "2", "3", "4", "5", "6")
+biComp= data.frame(typeMod = type,
+                         overall_acc = rep(NA,length(type)),
+                         sensitivity = rep(NA, length(type)),
+                         specificity = rep(NA, length(type)))
+
+##Adding in my model. Already calcualtd from cutoff calculations
+biComp[1,2]= error_data[245,2]
+biComp[1,3]= error_data[245,3]
+biComp[1,4]= error_data[245,4]
+
+for(i in 2:length(type)){
+  pi_hat= mam$br>=i
+  x= table(mam$severity, pi_hat)
+  
+  biComp[i,"overall_acc"]= (x[1,1]+x[2,2])/nrow(mam)
+  biComp[i,"sensitivity"]= x[2,2]/(x[2,2]+ x[2,1])
+  biComp[i,"specificity"]= x[1,1]/(x[1,1]+ x[1,2])
+}
+```
+
+Table 2:
+```{r, echo=FALSE}
+biComp
+```
+
+
+Table of the my model, logMod, and the various cutoffs of the BI-RADS Assessment. As the assessment is a sliding scale and does not have inherent classifications, I used the scale's values as a cutoff. (I.E for 2, this means that if a patient had a BI-RADS Assessment of 2 or higher they would be classified as having a malignant lesion)
+
+Figure 2: 
+```{r, echo=FALSE}
+
+##Comparison Models
+
+colors= c("accuracy"="royalblue4", "sensitivity"="red4", "specificity"="darkgoldenrod3")
+
+ggplot()+ geom_line(data = biComp, aes(x = typeMod, y = overall_acc, group= 1, color= "accuracy"))+
+  geom_line(data = biComp, aes(x = typeMod, y = sensitivity, color= "sensitivity", group=1, ))+
+  geom_line(data = biComp, aes(x = typeMod, y = specificity, color= "specificity", group=1, ))+
+  scale_colour_manual(name = 'Metirc', values= colors)+ xlab("Model Type")+ ylab("")
+```
+
+Scatterplot Visualization of Table 2. 
+
+
+## Discussion
+
+Overall my final logistic model of age, margin, and shape was able to achieve fairly strong predictive power. It had an overall accuracy of 80%, sensitivity of 90%, and specificity of 70% (Table 1). While I would have liked to see generally higher accuracy, the high sensitivity and specificity achieves the original goals of the project. The logistic regression was able to fairly accurately predict malignant lesions among those who have the disease, and was able to minimize the number of false positives with a 26% false positive rate, which was significantly lower than the 70% rate reported in the dataset. 
+
+When comparing the logistic model to the doctors predictions, however, it is hard to make an accurate assessment about which one was better. The scale of BI-RADS Assessment creates inherent challenges about whether to classify a lesion as malignant or not. By creating, cutoffs on this scale, it only created giant polarization in the doctors predictions. In short, as seen in Figure 2 of the results, any cutoff on the scale between 2 and 4 kept sensitivity at 100% and specificity at almost 0%, and any cutoff higher than 5 made sensitivity almost 0% and specificity at 100%. A cutoff of 5 was the only model that had comparable predictions to my own.
+
+If you look only at the predictions with a 5 cutoff of BI-RADS Assessment, I do believe that my model performed slightly better. While the doctor cutoff model overall had slightly better accuracy and specificity, the sensitivity was significantly lower at around 72% compared to around my models 90% (Table 2). Although the main focus of this project was to decrease the number of false positives and the cutoff doctor model does technically achieve that, I believe that the trade off of sensitivity is too great and hurts the overall efficacy of the model. It is for these reasons, that I ultimately prefer the regression model as it was able to achieve a fairly high specificity with only minor drops in sensitivity. 
+
+
+## Conclusion
+
+The BI-RADS Assessment and my own logistic regression model fundamentally challenge how we want to prioritize testing for breast cancer. As it currently stands, it's easy to see how there exists such a high false positive rate among mammogram testing. A categorical scale like BI-RADS Assessment  inherently biases predicting the lesion as malignant, and balanced predictions (not inherently 100% sensitivity and 0% specificity) were not able to be  achieved until a very high cutoff on the scale. This makes sense because doctors and patients would rather operate on a benign tumor than not operate on a malignant one. If there is be a method that can improve overall testing and specificity, we have to decide upon what is an acceptable drop off in sensitivity. For some the answer is zero, and until we can get a model with such predictive power its likely we will not switch from doctors predictions. Yet, if we are willing to tolerate a drop in sensitivity, it does make sense to begin transition to algorithmic predictions, such as my final logistic model, as it much easier to balance the trade off in sensitivity and specificity. 
+
+My final logistic model, I do believe provides innate benefits. It's hard to deny its performance and it does achieve a fairly high specificity with only minor drop offs in sensitivity (Table 1). At the moment, it is not strong enough to completely replace doctor predictions as some could see the sensitivity drop off as too significant. I do believe, however, that it can provide doctors a reliable sense of the probability a lesion is malignant, something the scale model cannot do, and the overall sensitivity and specificity for the cutoffs they decide on. 
+
+If there is to exist a model that can accurately predict malignant lesions, I believe that is likely going to need more data than what is provided in this set. In addition to age, I would also include other risk factors such as smoking, family history, or even including certain genes. And to get the most accurate predictions, I do not think we can continue categorizing the lesions physical characteristics on a scale. There are inherent biases already entering the data soon as the category is made. Image classification or coordinates of the lesion would be a much better solution. 
+
+Although my final logistic model does not provide strong enough results to completely do away with doctor predictions, people should not be discouraged from trying other datasets or models to achieve better accuracy. Research should continue on the subject so that we can ensure we are identifying cancerous lesions as quickly as possible. 
+
+
+
+
+
+
+
+
+
